@@ -1,0 +1,18 @@
+{
+  "name": "accounts-payment-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Accounts & Payment microservice for the EPOS platform",
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @accounts-payment/api dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @accounts-payment/api start",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "dependencies": {
+    "razorpay": "^2.9.8"
+  }
+}
