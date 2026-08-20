@@ -66,6 +66,13 @@ const webhookSchema = new Schema(
       index: true,
     },
 
+    providerRefundId: {
+  type: String,
+  required: false,
+  trim: true,
+  index: true,
+},
+
     payload: {
       type: Schema.Types.Mixed,
       required: true,

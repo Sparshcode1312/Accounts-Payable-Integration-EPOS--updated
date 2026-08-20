@@ -24,6 +24,7 @@ export interface CreateWebhookRepositoryInput {
   paymentId?: string;
   refundId?: string;
   providerTransactionId?: string;
+  providerRefundId?: string;
 }
 
 function toObjectId(
@@ -92,6 +93,14 @@ export class WebhookRepository {
                 input.providerTransactionId,
             }
           : {}),
+
+          ...(input.providerRefundId !==
+undefined
+  ? {
+      providerRefundId:
+        input.providerRefundId,
+    }
+  : {}),
 
         status: "RECEIVED",
       });

@@ -122,6 +122,19 @@ export class RefundRepository {
     }).exec();
   }
 
+  async findByProviderRefundId(
+  tenantId: string,
+  providerRefundId: string,
+): Promise<RefundDocument | null> {
+  return RefundModel.findOne({
+    tenantId: toObjectId(
+      tenantId,
+      "tenantId",
+    ),
+    providerRefundId,
+  }).exec();
+}
+
   async findByPaymentId(
     tenantId: string,
     paymentId: string,

@@ -7,6 +7,22 @@ import type {
 import { Types } from "mongoose";
 
 import {
+  env,
+} from "../../../config/env.js";
+
+import {
+  getWebhookVerifier,
+} from "../providers/webhook-verifier.factory.js";
+
+import {
+  parseWebhookEvent,
+} from "../providers/webhook-event.parser.js";
+
+import type {
+  WebhookProvider,
+} from "../types/payment.types.js";
+
+import {
   webhookService,
 } from "../services/webhook.service.js";
 
@@ -31,7 +47,281 @@ function validateObjectId(
   return true;
 }
 
+function getHeader(
+  req: Request,
+  name: string,
+): string | undefined {
+  const value =
+    req.header(name);
+
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0
+  ) {
+    return undefined;
+  }
+
+  return value.trim();
+}
+
+function parseRawPayload(
+  rawBody: string,
+): Record<string, unknown> | null {
+  try {
+    const parsed: unknown =
+      JSON.parse(rawBody);
+
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function getProviderFromParam(
+  value:
+    | string
+    | string[]
+    | undefined,
+): WebhookProvider | null {
+  if (
+    typeof value !== "string"
+  ) {
+    return null;
+  }
+
+  const provider =
+    value.toUpperCase();
+
+  if (
+    provider === "RAZORPAY" ||
+    provider === "STRIPE"
+  ) {
+    return provider;
+  }
+
+  return null;
+}
+
 export async function receiveWebhook(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    /*
+     * Existing local/test webhook contract.
+     * Keep this working in development/test.
+     */
+    if (
+      env.NODE_ENV !== "production" &&
+      req.body !== null &&
+      typeof req.body === "object" &&
+      !Array.isArray(req.body) &&
+      typeof (
+        req.body as Record<
+          string,
+          unknown
+        >
+      ).tenantId === "string"
+    ) {
+      return receiveLegacyWebhook(
+        req,
+        res,
+        next,
+      );
+    }
+
+    const provider =
+      getProviderFromParam(
+        req.params.provider,
+      );
+
+    if (!provider) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Unsupported webhook provider",
+      });
+
+      return;
+    }
+
+    const rawBody =
+      req.rawBody;
+
+    if (
+      typeof rawBody !== "string" ||
+      rawBody.length === 0
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Raw webhook body is required",
+      });
+
+      return;
+    }
+
+    const signature =
+      provider === "RAZORPAY"
+        ? getHeader(
+            req,
+            "x-razorpay-signature",
+          )
+        : getHeader(
+            req,
+            "stripe-signature",
+          );
+
+    if (!signature) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Webhook signature is required",
+      });
+
+      return;
+    }
+
+    const verifier =
+      getWebhookVerifier(
+        provider,
+      );
+
+    const valid =
+      verifier.verifySignature({
+        payload: rawBody,
+        signature,
+      });
+
+    if (!valid) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Invalid webhook signature",
+      });
+
+      return;
+    }
+
+    const payload =
+      parseRawPayload(
+        rawBody,
+      );
+
+    if (!payload) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Invalid webhook JSON payload",
+      });
+
+      return;
+    }
+
+    const eventId =
+      provider === "RAZORPAY"
+        ? getHeader(
+            req,
+            "x-razorpay-event-id",
+          )
+        : typeof payload.id ===
+            "string"
+          ? payload.id
+          : undefined;
+
+    if (!eventId) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Webhook event ID is required",
+      });
+
+      return;
+    }
+
+    const parsed =
+      parseWebhookEvent(
+        provider,
+        payload,
+        eventId,
+      );
+
+    if (!parsed) {
+      res.status(200).json({
+        success: true,
+        ignored: true,
+        message:
+          "Webhook event is not handled",
+      });
+
+      return;
+    }
+
+    const result =
+      await webhookService.receiveProviderWebhook({
+        provider,
+
+        eventId:
+          parsed.eventId,
+
+        eventType:
+          parsed.eventType,
+
+        payload,
+
+        signature,
+
+        ...(parsed.providerTransactionId
+          ? {
+              providerTransactionId:
+                parsed.providerTransactionId,
+            }
+          : {}),
+
+        ...(parsed.providerRefundId
+          ? {
+              providerRefundId:
+                parsed.providerRefundId,
+            }
+          : {}),
+
+        ...(parsed.paymentId
+          ? {
+              paymentId:
+                parsed.paymentId,
+            }
+          : {}),
+
+        ...(parsed.refundId
+          ? {
+              refundId:
+                parsed.refundId,
+            }
+          : {}),
+      });
+
+    res.status(200).json({
+      success: true,
+      duplicate:
+        result.duplicate,
+      data:
+        result.webhook,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function receiveLegacyWebhook(
   req: Request,
   res: Response,
   next: NextFunction,
@@ -45,16 +335,18 @@ export async function receiveWebhook(
     if (!parsed.success) {
       res.status(400).json({
         success: false,
-        message: "Invalid webhook request",
-        errors: parsed.error.flatten(),
+        message:
+          "Invalid webhook request",
+        errors:
+          parsed.error.flatten(),
       });
 
       return;
     }
 
-    const data = parsed.data;
+    const data =
+      parsed.data;
 
-    // Validate tenantId
     if (
       !validateObjectId(
         data.tenantId,
@@ -65,9 +357,9 @@ export async function receiveWebhook(
       return;
     }
 
-    // Validate paymentId if provided
     if (
-      data.paymentId !== undefined &&
+      data.paymentId !==
+        undefined &&
       !validateObjectId(
         data.paymentId,
         "paymentId",
@@ -77,9 +369,9 @@ export async function receiveWebhook(
       return;
     }
 
-    // Validate refundId if provided
     if (
-      data.refundId !== undefined &&
+      data.refundId !==
+        undefined &&
       !validateObjectId(
         data.refundId,
         "refundId",
@@ -91,31 +383,42 @@ export async function receiveWebhook(
 
     const result =
       await webhookService.receiveWebhook({
-        tenantId: data.tenantId,
+        tenantId:
+          data.tenantId,
 
-        provider: data.provider,
+        provider:
+          data.provider,
 
-        eventId: data.eventId,
+        eventId:
+          data.eventId,
 
-        eventType: data.eventType,
+        eventType:
+          data.eventType,
 
-        payload: data.payload,
+        payload:
+          data.payload,
 
-        ...(data.signature !== undefined
+        ...(data.signature !==
+        undefined
           ? {
-              signature: data.signature,
+              signature:
+                data.signature,
             }
           : {}),
 
-        ...(data.paymentId !== undefined
+        ...(data.paymentId !==
+        undefined
           ? {
-              paymentId: data.paymentId,
+              paymentId:
+                data.paymentId,
             }
           : {}),
 
-        ...(data.refundId !== undefined
+        ...(data.refundId !==
+        undefined
           ? {
-              refundId: data.refundId,
+              refundId:
+                data.refundId,
             }
           : {}),
 
@@ -128,23 +431,19 @@ export async function receiveWebhook(
           : {}),
       });
 
-    // Duplicate webhook
-    if (result.duplicate) {
-      res.status(200).json({
+    res
+      .status(
+        result.duplicate
+          ? 200
+          : 201,
+      )
+      .json({
         success: true,
-        duplicate: true,
-        data: result.webhook,
+        duplicate:
+          result.duplicate,
+        data:
+          result.webhook,
       });
-
-      return;
-    }
-
-    // New webhook
-    res.status(201).json({
-      success: true,
-      duplicate: false,
-      data: result.webhook,
-    });
   } catch (error) {
     next(error);
   }

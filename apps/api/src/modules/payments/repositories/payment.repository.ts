@@ -130,6 +130,27 @@ export class PaymentRepository {
     }).exec();
   }
 
+  async findByIdAnyTenant(
+  paymentId: string,
+): Promise<PaymentDocument | null> {
+  return PaymentModel.findOne({
+    _id: toObjectId(
+      paymentId,
+      "paymentId",
+    ),
+  }).exec();
+}
+
+  async findByProviderTransactionIdAnyTenant(
+  provider: PaymentProviderType,
+  providerTransactionId: string,
+): Promise<PaymentDocument | null> {
+  return PaymentModel.findOne({
+    provider,
+    providerTransactionId,
+  }).exec();
+}
+
   async findByIdempotencyKey(
     tenantId: string,
     idempotencyKey: string,
