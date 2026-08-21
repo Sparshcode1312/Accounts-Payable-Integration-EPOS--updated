@@ -7,6 +7,7 @@ const transitions: Record<
   INITIATED: [
     "PENDING",
     "CANCELLED",
+     "FAILED",
     "EXPIRED",
   ],
 

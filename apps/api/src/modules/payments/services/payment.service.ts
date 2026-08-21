@@ -138,27 +138,42 @@ export class PaymentService {
      * 5. Create the payment/order
      *    with the external provider.
      */
-    const providerResult =
-      await provider.createPayment({
-        paymentId:
-          payment._id.toString(),
+    let providerResult;
 
-        amount:
-          input.amount,
+try {
+  providerResult =
+    await provider.createPayment({
+      paymentId:
+        payment._id.toString(),
 
-        currency:
-          input.currency,
+      amount:
+        input.amount,
 
-        method:
-          input.method,
+      currency:
+        input.currency,
 
-        ...(input.metadata
-          ? {
-              metadata:
-                input.metadata,
-            }
-          : {}),
-      });
+      method:
+        input.method,
+
+      ...(input.metadata
+        ? {
+            metadata:
+              input.metadata,
+          }
+        : {}),
+    });
+} catch (error) {
+  await paymentRepository.updateStatus(
+    payment._id.toString(),
+    input.tenantId,
+    "FAILED",
+    {
+      failedAt: new Date(),
+    },
+  );
+
+  throw error;
+}
 
     /*
      * 6. Store the provider transaction ID
@@ -186,24 +201,34 @@ export class PaymentService {
      *    provider-reported initial status.
      */
     if (
-      providerResult.status !==
-      updatedPayment.status
-    ) {
-      if (
-        providerResult.status ===
-        "PENDING"
-      ) {
-        return (
-          (await paymentRepository.updateStatus(
-            updatedPayment._id.toString(),
-            input.tenantId,
-            "PENDING",
-          )) ??
-          updatedPayment
-        );
-      }
-    }
+  providerResult.status !==
+  updatedPayment.status
+) {
+  assertValidTransition(
+    updatedPayment.status,
+    providerResult.status,
+  );
 
+  const timestampField =
+    this.getTimestampField(
+      providerResult.status,
+    );
+
+  return (
+    (await paymentRepository.updateStatus(
+      updatedPayment._id.toString(),
+      input.tenantId,
+      providerResult.status,
+      timestampField
+        ? {
+            [timestampField]:
+              new Date(),
+          }
+        : {},
+    )) ??
+    updatedPayment
+  );
+}
     return updatedPayment;
   }
 

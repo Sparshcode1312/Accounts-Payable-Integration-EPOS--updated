@@ -77,6 +77,13 @@ export class PaymentRepository {
 
       method: input.method,
 
+      ...(input.provider
+  ? {
+      provider: input.provider,
+    }
+  : {}),
+
+
       ...(input.providerId
         ? {
              providerId: toObjectId(
