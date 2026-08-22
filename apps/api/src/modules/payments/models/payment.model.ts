@@ -151,11 +151,21 @@ paymentSchema.index({
   createdAt: -1,
 });
 
-paymentSchema.index({
-  tenantId: 1,
-  providerId: 1,
-  providerTransactionId: 1,
-});
+paymentSchema.index(
+  {
+    tenantId: 1,
+    providerTransactionId: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      providerTransactionId: {
+        $exists: true,
+        $ne: null,
+      },
+    },
+  },
+);
 
 paymentSchema.index({
   tenantId: 1,

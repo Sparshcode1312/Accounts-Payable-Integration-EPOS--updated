@@ -6,6 +6,7 @@ import {
   getPaymentStatus,
   capturePayment,
   listPayments,
+   transitionPayment,
 } from "../controllers/payment.controller.js";
 
 const router = Router();
@@ -33,6 +34,11 @@ router.get(
 router.post(
   "/payments/:id/capture",
   capturePayment,
+);
+
+router.post(
+  "/payments/:id/transition",
+  transitionPayment,
 );
 
 export default router;

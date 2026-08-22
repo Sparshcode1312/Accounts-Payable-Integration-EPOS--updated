@@ -10,6 +10,10 @@ import {
   paymentService,
 } from "../services/payment.service.js";
 
+import type {
+  PaymentStatus,
+} from "../types/payment.types.js";
+
 import {
   createPaymentSchema,
 } from "../validators/payment.validator.js";
@@ -443,6 +447,86 @@ export async function capturePayment(
         id,
         amount,
       );
+
+    res.status(200).json({
+      success: true,
+      data: payment,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function transitionPayment(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { id } = req.params;
+
+    if (
+      typeof id !== "string" ||
+      !Types.ObjectId.isValid(id)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid payment id",
+      });
+
+      return;
+    }
+
+    const tenantId = getTenantId(req);
+
+    if (!tenantId) {
+      res.status(400).json({
+        success: false,
+        message:
+          "tenantId query parameter is required",
+      });
+
+      return;
+    }
+
+    if (!Types.ObjectId.isValid(tenantId)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid tenantId",
+      });
+
+      return;
+    }
+
+    const { status } = req.body;
+
+    if (
+      typeof status !== "string" ||
+      status.trim().length === 0
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "status is required",
+      });
+
+      return;
+    }
+
+    const payment =
+      await paymentService.transitionPayment(
+        tenantId,
+        id,
+        status as PaymentStatus,
+      );
+
+    if (!payment) {
+      res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+
+      return;
+    }
 
     res.status(200).json({
       success: true,

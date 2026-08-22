@@ -242,6 +242,125 @@ try {
     );
   }
 
+    async verifyPayment(
+    tenantId: string,
+    paymentId: string,
+  ) {
+    /*
+     * 1. Find the internal payment.
+     */
+    const payment =
+      await paymentRepository.findById(
+        paymentId,
+        tenantId,
+      );
+
+    if (!payment) {
+      throw new Error(
+        "Payment not found",
+      );
+    }
+
+    /*
+     * 2. Provider is required for
+     *    external payment verification.
+     */
+    if (!payment.provider) {
+      throw new Error(
+        "Payment provider is not configured",
+      );
+    }
+
+    /*
+     * 3. Provider transaction ID is
+     *    required to verify the payment.
+     */
+    if (
+      !payment.providerTransactionId
+    ) {
+      throw new Error(
+        "Payment does not have a provider transaction ID",
+      );
+    }
+
+    /*
+     * 4. Resolve the configured provider.
+     */
+    const provider =
+      getPaymentProvider(
+        payment.provider,
+      );
+
+    /*
+     * 5. Verify payment with the
+     *    external provider.
+     */
+    const result =
+      await provider.verifyPayment({
+        providerTransactionId:
+          payment.providerTransactionId,
+
+        paymentId:
+          payment._id.toString(),
+      });
+
+    /*
+     * 6. Provider could not verify
+     *    the payment.
+     */
+    if (!result.verified) {
+      return payment;
+    }
+
+    /*
+     * 7. Do not update the internal
+     *    payment if the provider returned
+     *    the same status.
+     */
+    if (
+      result.status ===
+      payment.status
+    ) {
+      return payment;
+    }
+
+    /*
+     * 8. Validate the state transition
+     *    before changing our database.
+     */
+    assertValidTransition(
+      payment.status,
+      result.status,
+    );
+
+    /*
+     * 9. Add the appropriate timestamp.
+     */
+    const timestampField =
+      this.getTimestampField(
+        result.status,
+      );
+
+    /*
+     * 10. Update our internal payment
+     *     status.
+     */
+    return (
+      (await paymentRepository.updateStatus(
+        paymentId,
+        tenantId,
+        result.status,
+        timestampField
+          ? {
+              [timestampField]:
+                new Date(),
+            }
+          : {},
+      )) ??
+      payment
+    );
+  }
+
   async getPaymentStatus(
     tenantId: string,
     paymentId: string,
